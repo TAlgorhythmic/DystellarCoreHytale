@@ -1,6 +1,5 @@
 package gg.dystellar.core.listeners;
 
-import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
@@ -57,9 +56,8 @@ public final class JoinsListener {
 			user.init(p);
 
 			User.users.put(p.getUuid(), user);
-			final var now = LocalDateTime.now();
 			for (Punishment pun : user.punishments) {
-				if (!pun.allowJoinMinigames() && !DystellarCore.getInstance().getSetup().allow_banned_players && (!pun.getExpirationDate().isPresent() || pun.getExpirationDate().get().isBefore(now))) {
+				if (!pun.allowJoinMinigames() && !DystellarCore.getInstance().getSetup().allow_banned_players && !pun.isExpired()) {
 					Message msg = Message.empty();
 					msg.insertAll(
 							Arrays.stream(lang.punishMessage)

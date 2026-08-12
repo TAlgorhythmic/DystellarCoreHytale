@@ -1,7 +1,6 @@
 package gg.dystellar.core.commands;
 
 import java.awt.Color;
-import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
 import com.hypixel.hytale.component.Ref;
@@ -37,7 +36,7 @@ public class PunishmentsCommand extends AbstractTargetPlayerCommand {
 			p.sendMessage(Message.join(Message.raw("Type").color(DARK_AQUA), Message.raw(": " + pun.getType()).color(Color.WHITE)));
 			p.sendMessage(Message.join(Message.raw("Creation Date").color(DARK_AQUA), Message.raw(": " + pun.getCreationDate().format(DateTimeFormatter.BASIC_ISO_DATE)).color(Color.WHITE)));
 			p.sendMessage(Message.join(Message.raw("Expiration Date").color(DARK_AQUA), Message.raw(": " + pun.getExpirationDate().map(d -> d.format(DateTimeFormatter.BASIC_ISO_DATE)).orElse("Never")).color(Color.WHITE)));
-			p.sendMessage(Message.join(Message.raw("Is Expired").color(DARK_AQUA), Message.raw(": " + (pun.getExpirationDate().isPresent() && pun.getExpirationDate().get().isBefore(LocalDateTime.now()) ? "Yes" : "No")).color(Color.WHITE)));
+			p.sendMessage(Message.join(Message.raw("Is Expired").color(DARK_AQUA), Message.raw(": " + (pun.isExpired() ? "Yes" : "No")).color(Color.WHITE)));
 			p.sendMessage(Message.join(Message.raw("Reason").color(DARK_AQUA), Message.raw(": " + pun.getReason()).color(Color.WHITE)));
 			p.sendMessage(Message.raw("---------------------------"));
 		}

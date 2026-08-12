@@ -44,4 +44,11 @@ public final class Punishment {
     public LocalDateTime getCreationDate() { return creationDate; }
     public Optional<LocalDateTime> getExpirationDate() { return Optional.ofNullable(expirationDate); }
     public void setExpirationDate(@Nullable LocalDateTime date) { this.expirationDate = date; }
+
+	/**
+	 * Whether this punishment has run out. A punishment without an expiration date is permanent and never expires.
+	 */
+	public boolean isExpired() {
+		return this.expirationDate != null && this.expirationDate.isBefore(LocalDateTime.now());
+	}
 }

@@ -1,6 +1,11 @@
 # DystellarCore
 
-Core plugin for the **Dystellar Network** Hytale servers.
+**Core plugin for the [Dystellar Network](https://dystellar.gg) Hytale servers.**
+
+![Java](https://img.shields.io/badge/Java-25-f89820)
+![Maven](https://img.shields.io/badge/build-Maven-C71A36)
+![Version](https://img.shields.io/badge/version-1.0--PRERELEASE-blue)
+![License](https://img.shields.io/badge/license-Organization--Exclusive-red)
 
 DystellarCore is the base mod every Dystellar game server loads. It owns the things that must behave
 identically on every server of the network: player data, ranks and permissions, punishments, private
@@ -10,9 +15,30 @@ State does not live on the server — it lives in the Dystellar backend. Servers
 for persistence, and over a websocket for real-time messages between each other (targeted, broadcast,
 and shared cache).
 
-- Group / artifact: `gg.dystellar:DystellarCoreHytale`
-- Version: `1.0-PRERELEASE`
-- Plugin id inside the server: `gg.dystellar_Core` (main class `gg.dystellar.core.DystellarCore`)
+| | |
+| --- | --- |
+| Artifact | `gg.dystellar:DystellarCoreHytale:1.0-PRERELEASE` |
+| Plugin id | `gg.dystellar_Core` (main class `gg.dystellar.core.DystellarCore`) |
+| Backend | [dystellar-backend-rs](https://github.com/TAlgorhythmic/dystellar-backend-rs) — **required**, not optional |
+| Toolchain | JDK 25, Maven 3.9+, Git LFS |
+
+---
+
+## Quick start
+
+```sh
+git lfs install && git lfs pull   # HytaleServer.jar (~125 MB) lives in LFS
+mvn package                       # -> target/DystellarCoreHytale-1.0-PRERELEASE.jar
+```
+
+Want a full two-server network with a backend, without touching a real server?
+
+```sh
+./setup-docker.sh                 # builds, authenticates, and brings up backend + 2 servers
+```
+
+See [Local development environment](#local-development-environment-docker) for what that script does
+before you run it — it performs an interactive OAuth device flow the first time.
 
 ---
 
@@ -30,8 +56,11 @@ and shared cache).
 - [Developer API](#developer-api)
 - [Project layout](#project-layout)
 - [Tests](#tests)
+- [Troubleshooting](#troubleshooting)
 - [Known gaps](#known-gaps)
+- [Contributing](#contributing)
 - [References](#references)
+- [License](#license)
 
 ---
 
@@ -70,7 +99,7 @@ flowchart LR
   `authorization` API key and an `X-Target-Host` header taken from `host` in the config.
 - **WebSocket** (`gg.dystellar.core.api.comms.WsClient`) — the backend relays binary frames between
   servers. Plugins register named **channels**; only servers with the same channel name receive a
-  message. Message types: `TARGET`, `PROPAGATE`, `CACHE_WRITE`, `CACHE_READ`.
+  message. Message types: `PROPAGATE`, `TARGET`, `CACHE_READ`, `CACHE_WRITE`.
 - **Subchannels** (`gg.dystellar.core.messaging.Subchannel`) — DystellarCore's own protocol on top of
   its `core` channel: session replies, player lookup, address requests, friend removal, and group /
   punishment invalidation. The first byte of every payload is the subchannel **ordinal**, so entries
@@ -78,6 +107,30 @@ flowchart LR
 
 If the backend is unreachable at startup, config loading fails and the plugin shuts the server down
 with `ShutdownReason.CRASH` — the core is a hard dependency, not a best-effort one.
+
+### Player lifecycle
+
+```mermaid
+sequenceDiagram
+    participant P as Player
+    participant S as Server (DystellarCore)
+    participant BE as Backend
+
+    P->>S: connect
+    S->>BE: GET /api/core/user_connected?uuid&name&address
+    BE-->>S: User (friends, punishments, group, language, toggles)
+    S->>S: cache in User.users, bind to PlayerRef
+    alt active punishment and allow_banned_players = false
+        S-->>P: disconnect with localized punish message
+    end
+    P->>S: disconnect
+    S->>S: drop from User.users
+    S->>BE: PUT /api/core/user_save
+```
+
+Both sides run off the server thread on `HytaleServer.SCHEDULED_EXECUTOR`, so a slow backend never
+blocks the tick loop — but it does mean a player exists on the server for a moment before their data
+lands.
 
 ## Requirements
 
@@ -103,6 +156,8 @@ mvn package
 Produces a shaded jar at `target/DystellarCoreHytale-1.0-PRERELEASE.jar`. Run tests only with
 `mvn test`.
 
+Resource filtering is on, so `${project.version}` is substituted into resources at build time.
+
 ## Installing on a server
 
 1. Copy the shaded jar into the server's `mods/` directory (renaming it is fine — the dev environment
@@ -110,7 +165,8 @@ Produces a shaded jar at `target/DystellarCoreHytale-1.0-PRERELEASE.jar`. Run te
 2. Start the server once. The plugin creates its data directory `mods/gg.dystellar_Core/` and writes
    `setup.json`, `lang_en.json` and `lang_es.json` with defaults.
 3. Stop the server, point `setup.json` at your backend (`api`, `websocket_endpoint`, `host`,
-   `api_key`) and set `server_name` to this server's network-unique name.
+   `api_key`) and set `server_name` to this server's network-unique name and `public_ip` to the
+   address players use to reach it.
 4. Start again. On success the log shows `[Dystellar] Configuration loaded successfully`.
 
 ## Configuration
@@ -130,7 +186,7 @@ Generated from `gg.dystellar.core.config.Setup`.
 | `automated_messages_rate` | `240` | Seconds between announcements. |
 | `prevent_weather` | `true` | Forces weather in every world at startup. |
 | `forced_weather` | `"Zone1_Sunny"` | Weather asset applied when `prevent_weather` is on. |
-| `public_ip` | — | Address clients use to reach this server; answered to other servers that ask for this server's address. |
+| `public_ip` | `"53.63.213.73"` | Address clients use to reach this server; answered to other servers that ask for this server's address, and used by `/join <port>`. The default is a placeholder — **always override it**. |
 | `host` | `"localhost"` | Value sent as the `X-Target-Host` header to the backend. |
 | `api` | `"http://localhost"` | Backend base URL. |
 | `websocket_endpoint` | `"ws://localhost/api/core/create_ws"` | Backend websocket endpoint. |
@@ -171,8 +227,9 @@ What it does:
 3. Performs the Hytale OAuth **device flow** — it prints a URL to open in a browser; authorise it
    once and the refresh token is cached in `container_data/hytale-release/refresh_token`. Later runs
    refresh silently.
-4. Mints two game sessions (one per server) and exports them as `SESSION_TOKEN`/`IDENTITY_TOKEN` and
-   `SESSION_TOKEN1`/`IDENTITY_TOKEN1`.
+4. Mints two game sessions (one per server, the second refreshed from the first) and exports them as
+   `SESSION_TOKEN`/`IDENTITY_TOKEN` and `SESSION_TOKEN1`/`IDENTITY_TOKEN1`. The current session is
+   cached in `container_data/hytale-release/session_token`.
 5. Copies the shaded jar to `container_data/hytale-release/DystellarCore.jar`.
 6. `docker compose up -d`.
 
@@ -211,7 +268,7 @@ Registered in `DystellarCore#setup()`. Arguments in `<>` are required, `[]` opti
 | Command | Aliases | Permission | Description |
 | --- | --- | --- | --- |
 | `/ban <player> <reason> [time] [--ipban]` | — | `dystellar.punish` | Ban a player. `time` matches `^[0-9]+[ydhm]$` (e.g. `30m`, `7d`, `2y`); omit it for permanent. `--ipban` also bans the address. |
-| `/mute <player> <reason> <time>` | — | `dystellar.punish` | Mute a player for the given duration. |
+| `/mute <player> <reason> <time>` | — | `dystellar.punish` | Mute a player for the given duration (same time format). |
 | `/blacklist <player> <reason>` | — | `dystellar.admin` | Permanent, network-wide exclusion. |
 | `/unpunish <player> <id>` | — | `dystellar.unpunish` | Revoke a punishment by id (see `/punishments`). |
 | `/punishments <player>` | — | `dystellar.punishments` | List a player's punishments with ids, dates and reasons. |
@@ -261,7 +318,7 @@ refresh the affected group without a restart.
 | `/ignorelist [list\|remove <player>]` | `blockslist` (`l`/`ls`, `rm`/`del`/`d`) | `dystellar.ignore` | Manage blocked players. |
 | `/toggleprivatemessages` | `togglemessages`, `tpms`, `tpm`, `pms` | `dystellar.togglemessages` | Cycle PM mode: all → friends only → disabled. |
 | `/toggleglobalchat` | `tgc`, `togglechat` | `dystellar.togglechat` | Toggle global chat visibility. |
-| `/join <server>` | `j` | `dystellar.referral` | Connect to another server by network name, `ip`, `ip:port` or bare port. |
+| `/join <server>` | `j` | `dystellar.referral` | Connect to another server. Accepts a network name (resolved over the websocket), `ip`, `ip:port`, or a bare port (uses this server's `public_ip`). Plain `ip` defaults to port `5520`. |
 | `/suffix` | `suffixs`, `suffixes` | `dystellar.suffix` | Cosmetic suffix UI — **not implemented yet**. |
 
 ## Permissions
@@ -300,7 +357,7 @@ var out = api.requestJson("/players/update", "POST", "{\"score\": 42}");
 // Websocket — register your own channel; only servers running your plugin see it
 Channel ch = DystellarCore.getApi().wsClient.registerChannel("MyPlugin",
     (source, in)  -> { /* incoming message */ },
-    (id, found, in) -> { /* cache read response */ });
+    (cacheId, found, in) -> { /* cache read response */ });
 
 // Broadcast to every other server running this plugin
 var msg = ch.createPropagatedMessageStream(128);
@@ -310,6 +367,10 @@ ch.sendMessage(msg.getBuffer());
 
 // Or target one server by its `server_name`
 var direct = ch.createTargetedMessageStream("server1", 256);
+
+// Shared cache: write with an expiry in millis (-1 = never expires), then read it back
+var cache = ch.createCacheWriteMessageStream(256, 42, 30_000L);
+ch.readCacheRequest(42);
 ```
 
 ```java
@@ -320,7 +381,9 @@ config.get().someField = "value";
 config.save();
 ```
 
-Handlers run off the server thread — treat them as asynchronous and do not assume thread safety.
+`ByteBufferOutputStream` writes and `ByteBufferInputStream` reads must be symmetric — the protocol is
+raw binary with no framing beyond the length prefix on strings. Handlers run off the server thread —
+treat them as asynchronous and do not assume thread safety.
 
 ## Project layout
 
@@ -353,12 +416,24 @@ mvn test
 
 JUnit 5 covers message compilation (colour tags, placeholders, formatting) and permission resolution.
 
+## Troubleshooting
+
+| Symptom | Cause / fix |
+| --- | --- |
+| Build fails resolving `com.hypixel.hytale:server` | `libs/HytaleServer.jar` is an LFS pointer, not the jar. Run `git lfs install && git lfs pull`. |
+| `invalid source release: 25` | Maven is running on an older JDK. Point `JAVA_HOME` at a JDK 25 install. |
+| Server shuts down at startup with `[Dystellar] Failed to load core plugin` | The backend is unreachable or `api_key` is wrong. The core treats the backend as a hard dependency; check `api`, `websocket_endpoint`, `host` and `api_key` in `setup.json`. |
+| Servers start but never see each other | Duplicate or mismatched `server_name`. It is the websocket identity, and must be unique per server on the network. |
+| `/join <name>` says "Server not found" | The target server is not connected to the same backend websocket, or its `public_ip` is unset. |
+| Docker servers start unauthenticated | `docker compose up` was run directly. Session tokens are exported by `setup-docker.sh` — run that instead. |
+| Edits to `setup.json` inside a container are lost | The entrypoint rewrites it from the compose environment on every start. Change `docker-compose.yml` or the entrypoint. |
+
 ## Known gaps
 
 - `/suffix` responds "Not implemented yet"; `Suffix` is still a hardcoded enum using legacy `&` colour
   codes and should move to the backend.
 - Inbox support is stubbed out — see the `TODO` blocks in `messaging/Handler.java` and
-  `listeners/JoinsListener.java`.
+  `listeners/JoinsListener.java`, plus the commented-out `INBOX_*` subchannels.
 - Friend request accept/reject buttons wait on clickable-message support in the Hytale API.
 - [`docs/API_DOC.md`](docs/API_DOC.md) has drifted from the code in two places: `CacheReadReceiver`
   takes `(cacheId, found, payload)` — there is no `source` parameter — and cache expiry is a plain
@@ -367,6 +442,21 @@ JUnit 5 covers message compilation (colour tags, placeholders, formatting) and p
 - `src/main/resources/plugin.yml`, `lang-en.yml` and `spawnitems.yml` are leftovers from the Bukkit
   version of this plugin. The live manifest is `src/main/resources/manifest.json`, and the live
   language files are the generated `lang_en.json` / `lang_es.json`.
+- `manifest.json` hardcodes `"Version": "1.0.0"` while the Maven project is `1.0-PRERELEASE`; the two
+  drift apart on every release until the manifest is filtered like `plugin.yml` was.
+
+## Contributing
+
+The license permits contributions back to this repository but not independent forks — see below.
+In practice:
+
+- Work from a branch in this repository, or send patches; do not publish a derivative repo.
+- `mvn test` must pass. New message keys need a matching entry in **both** `lang_en` and `lang_es`
+  defaults in `config/Messages.java`.
+- Never reorder `Subchannel` entries — the wire protocol identifies messages by enum ordinal, and a
+  reorder silently breaks every server still running the old build. Append only.
+- New commands go in `commands/`, get registered in `DystellarCore#setup()`, and should declare a
+  `dystellar.*` permission node.
 
 ## References
 
